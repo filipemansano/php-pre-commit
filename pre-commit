@@ -16,7 +16,6 @@
 ##########
 
     cat <<\EOF
-
     ____                                                 _ __
    / __ \________        _________  ____ ___  ____ ___  (_) /_
   / /_/ / ___/ _ \______/ ___/ __ \/ __ `__ \/ __ `__ \/ / __/
@@ -52,13 +51,9 @@ if [ "$allownonascii" != "true" ] &&
 then
     cat <<\EOF
 Error: Attempt to add a non-ASCII file name.
-
 This can cause problems if you want to work with people on other platforms.
-
 To be portable it is advisable to rename the file.
-
 If you know what you are doing you can disable this check using:
-
   git config hooks.allownonascii true
 EOF
     exit 1
@@ -189,10 +184,11 @@ if [ -n "$files" ]; then
     for file in $files; do
 
         # Check if they are valid php files.
-        php_lint_output=`php -l -d display_errors=On $file 2>&1 | grep 'PHP Parse error:'`
+        php_lint_output=`php -l -d display_errors=On $file 2>&1`
 
         # If it did contain errors, we have output.
-        if [ -n "$php_lint_output" ]; then
+        if [ $php_lint_output != "No syntax errors detected in $file" ]; then
+           
             # Printing error message.
             message_failure "$php_lint_output"
 
@@ -319,15 +315,37 @@ if [ -n "$files" ]; then
     echo "╰─────────────────────────────────────────────────╯"
     echo
 
+
     message_info "Running PHP Code Sniffer..."
     echo
 
-    # Verificando se arquivo binário executável existe para [php-cs-fixer].
-    if ! hash php-cs-fixer 2>/dev/null; then
-        message_warning "No valid PHP Coding Standards Fixer executable found! Please have one available as either ✖✖✖ php-cs-fixer ✖✖✖"
-        message_info "Visit: https://github.com/FriendsOfPHP/PHP-CS-Fixer#installation"
-        echo
-        exit 1
+    php_cs_fixer_local_bin="php-cs-fixer.phar"
+
+    # Default command to run PHP CodeSniffer.
+    php_cs_fixer_bin="php $php_cs_fixer_local_bin"
+
+    # Default command via install local project package with Composer (Depot Manager for PHP).
+    php_cs_fixer_vendor_bin="vendor/bin/php-cs-fixer"
+
+    # Standard command via composer global installation.
+    php_cs_fixer_global_bin="php-cs-fixer"
+
+    # Verifying command default based on existing conditions.
+    if [ -f "$php_cs_fixer_vendor_bin" ]; then
+        php_cs_fixer_bin=$php_cs_fixer_vendor_bin
+    else
+        if hash php-cs-fixer 2>/dev/null; then
+            php_cs_fixer_bin=$php_cs_fixer_global_bin
+        else
+            if [ -f "$php_cs_fixer_local_exec" ]; then
+                php_cs_fixer_bin=$php_cs_fixer_bin
+            else
+                message_warning "No valid PHP Coding Standards Fixer executable found! Please have one available as either $php_cs_fixer_vendor_bin, $php_cs_fixer_global_bin or $php_cs_fixer_local_exec"
+                message_info "Visit: https://github.com/FriendsOfPHP/PHP-CS-Fixer#installation"
+                echo
+                exit 1
+            fi
+        fi
     fi
 
     printf "${color_bold_yellow}✔︎ Rules: PSR2, Symfony${color_reset}\n"
@@ -338,13 +356,13 @@ if [ -n "$files" ]; then
     git status --porcelain | grep -e '^[AM]\(.*\).php$' | cut -c 3- | while read line; do
         # php-cs-fixer CHECK.
         # --dry-run (The --dry-run option displays the files that need to be fixed but without actually modifying them).
-        php_cs_fixer_codestyle_dry_run=`php-cs-fixer --dry-run --diff --verbose --using-cache=no --rules=@PSR2,@Symfony fix ${line} 2>&1 | grep "diff"`
+        php_cs_fixer_codestyle_dry_run=`${php_cs_fixer_bin} --dry-run --diff --verbose --using-cache=no --rules=@PSR2,@Symfony fix ${line} 2>&1 | grep "diff"`
 
         # Check last command (PHP-CS-FIXER) code for fixed.
         if [ -n "$php_cs_fixer_codestyle_dry_run" ]; then
 
             # Applicando PSRs e @Symfony.
-            php_cs_fixer_codestyle=`php-cs-fixer --diff --using-cache=no --rules=@PSR2,@Symfony fix ${line} &>/dev/null`
+            php_cs_fixer_codestyle=`${php_cs_fixer_bin} --diff --using-cache=no --rules=@PSR2,@Symfony fix ${line} &>/dev/null`
 
             git add ${line}
 
@@ -360,11 +378,33 @@ if [ -n "$files" ]; then
     echo "╰──────────────────────────────────────────╯"
     echo
 
-    if ! hash phpmd 2>/dev/null; then
-        message_warning "No valid PHP Mess Detector executable found! Please have one available as either ✖✖✖ phpmd ✖✖✖"
-        message_info "Visit: https://phpmd.org/download/index.html"
-        echo
-        exit 1
+    phpmd_local_bin="phpmd.phar"
+
+    # Default command to run PHP CodeSniffer.
+    phpmd_bin="php $phpmd_local_bin"
+
+    # Default command via install local project package with Composer (Depot Manager for PHP).
+    phpmd_vendor_bin="vendor/bin/phpmd"
+
+    # Standard command via composer global installation.
+    phpmd_global_bin="phpmd"
+
+    # Verifying command default based on existing conditions.
+    if [ -f "$phpmd_vendor_bin" ]; then
+        phpmd_bin=$phpmd_vendor_bin
+    else
+        if hash phpmd 2>/dev/null; then
+            phpmd_bin=$phpmd_global_bin
+        else
+            if [ -f "$phpmd_local_exec" ]; then
+                phpmd_bin=$phpmd_bin
+            else
+                message_warning "No valid PHP Mess Detector executable found! Please have one available as either $phpmd_vendor_bin, $phpmd_global_bin or $phpmd_local_exec"
+                message_info "Visit: https://phpmd.org/download/index.html"
+                echo
+                exit 1
+            fi
+        fi
     fi
 
     # @see https://phpmd.org/rules/index.html
@@ -378,7 +418,7 @@ if [ -n "$files" ]; then
     message_info "PHPMD - PHP Mess Detector: [ ${staged_files_separated_by_comma} ]"
 
     # PHPMD running script
-    phpmd_output=$(phpmd ${staged_files_separated_by_comma} text "${phpmd_rules}" --suffixes php)
+    phpmd_output=$(${phpmd_bin} ${staged_files_separated_by_comma} text "${phpmd_rules}" --suffixes php)
     phpmd_retval=$?
 
     if [ $phpmd_retval -ne 0 ]; then
@@ -400,12 +440,34 @@ if [ -n "$files" ]; then
     echo "╰─────────────────────────────────────────────────╯"
     echo
 
-    if ! hash phpcpd 2>/dev/null; then
-        message_warning "No valid PHP Copy/Paste Detector executable found! Please have one available as either ✖✖✖ phpcpd ✖✖✖"
-        printf "${color_bold_white}Please install phpcpd, e.g.:${color_reset}\n"
-        printf "${color_bold_green}composer global require --dev 'sebastian/phpcpd=*'${color_reset}\n"
-        echo
-        exit 1
+    phpcpd_local_bin="phpcpd.phar"
+
+    # Default command to run PHP CodeSniffer.
+    phpcpd_bin="php $phpcpd_local_bin"
+
+    # Default command via install local project package with Composer (Depot Manager for PHP).
+    phpcpd_vendor_bin="vendor/bin/phpcpd"
+
+    # Standard command via composer global installation.
+    phpcpd_global_bin="phpcpd"
+
+    # Verifying command default based on existing conditions.
+    if [ -f "$phpcpd_vendor_bin" ]; then
+        phpcpd_bin=$phpcpd_vendor_bin
+    else
+        if hash phpcpd 2>/dev/null; then
+            phpcpd_bin=$phpcpd_global_bin
+        else
+            if [ -f "$phpcpd_local_exec" ]; then
+                phpcpd_bin=$phpcpd_bin
+            else
+                message_warning "No valid PHP Copy/Paste Detector executable found! Please have one available as either $phpcpd_vendor_bin, $phpcpd_global_bin or $phpcpd_local_exec"
+                printf "${color_bold_white}Please install phpcpd, e.g.:${color_reset}\n"
+                printf "${color_bold_green}composer global require --dev 'sebastian/phpcpd=*'${color_reset}\n"
+                echo
+                exit 1
+            fi
+        fi
     fi
 
     phpcpd_arguments="--no-interaction --progress --min-lines=3 --min-tokens=40"
@@ -414,7 +476,7 @@ if [ -n "$files" ]; then
 
     # PHPCPD running script
     phpcpd_tmp=/tmp/t$$
-    phpcpd ${phpcpd_arguments} ${staged_files_separated_by_spaces} > $phpcpd_tmp
+    ${phpcpd_bin} ${phpcpd_arguments} ${staged_files_separated_by_spaces} > $phpcpd_tmp
 
     if grep -q 'Found' $phpcpd_tmp
     then
@@ -451,5 +513,4 @@ if [ -n "$errors" ]; then
 fi
 
 message_success 'No Errors Found 👏 👏 👏 👏 '
-
 exit 0
